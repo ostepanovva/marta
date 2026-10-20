@@ -1,0 +1,19 @@
+name: marta
+
+services:
+  bot:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - ./data:/data          # база данных Марты
+      - whisper-models:/models # модель распознавания речи (скачивается один раз)
+    mem_limit: 1500m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  whisper-models:
