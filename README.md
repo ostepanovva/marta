@@ -23,15 +23,12 @@
 ## Установка на сервер
 
 ```bash
-cd /opt
-git clone https://github.com/ostepanovva/marta.git
-cd marta
-cp .env.example .env
-chmod 600 .env
-nano .env          # вписать TELEGRAM_BOT_TOKEN и GIGACHAT_AUTH_KEY, сохранить: Ctrl+O, Enter, Ctrl+X
-docker compose up -d --build
-docker compose logs -f   # выход из просмотра: Ctrl+C
+cd /opt && git clone https://github.com/ostepanovva/marta.git
+bash /opt/marta/install.sh
 ```
+
+Установщик спросит токен бота и ключ GigaChat, сохранит их в `/opt/marta/.env`
+(доступен только root), соберет и запустит Марту.
 
 ## Полезные команды (из папки `/opt/marta`)
 
