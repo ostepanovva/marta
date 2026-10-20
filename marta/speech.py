@@ -17,6 +17,10 @@ class Transcriber:
         self._last_used = 0.0
         self._lock = asyncio.Lock()
 
+    @property
+    def loaded(self) -> bool:
+        return self._model is not None
+
     def _load(self):
         from faster_whisper import WhisperModel
 
@@ -24,6 +28,16 @@ class Transcriber:
         return WhisperModel(
             self.model_name, device="cpu", compute_type="int8", download_root=self.cache_dir, cpu_threads=2
         )
+
+    async def prefetch(self) -> None:
+        """Заранее скачивает модель, чтобы первое голосовое не ждало загрузки."""
+        from faster_whisper.utils import download_model
+
+        try:
+            await asyncio.to_thread(download_model, self.model_name, cache_dir=self.cache_dir)
+            log.info("Модель распознавания речи %s готова", self.model_name)
+        except Exception:
+            log.exception("Не удалось скачать модель распознавания речи %s", self.model_name)
 
     def _run(self, path: str) -> str:
         if self._model is None:

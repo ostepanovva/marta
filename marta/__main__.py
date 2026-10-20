@@ -44,6 +44,7 @@ async def main() -> None:
             BotCommand(command="confirm", description="Вкл/выкл подтверждение записей"),
         ])
         logging.info("Марта запущена")
+        prefetch = asyncio.create_task(marta.transcriber.prefetch())  # noqa: F841 — держим ссылку на задачу
         await dp.start_polling(bot)
     finally:
         scheduler.shutdown(wait=False)

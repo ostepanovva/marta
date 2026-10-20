@@ -152,18 +152,24 @@ async def message_text(message: Message, bot: Bot, marta: Marta) -> str | None:
         return message.text.strip()
     if not message.voice:
         return None
-    await bot.send_chat_action(message.chat.id, "typing")
+    status = await message.answer(
+        "🎧 Слушаю…" if marta.transcriber.loaded else "🎧 Слушаю… Первое голосовое после перерыва — чуть дольше."
+    )
     fd, path = tempfile.mkstemp(suffix=".ogg")
     os.close(fd)
     try:
         await bot.download(message.voice, destination=path)
         text = await marta.transcriber.transcribe(path)
+    except Exception:
+        log.exception("Не удалось расшифровать голосовое")
+        await status.edit_text("Не получилось расшифровать голосовое 😕 Напиши текстом, а я пока разберусь.")
+        return None
     finally:
         os.remove(path)  # аудио не храним
     if not text:
-        await message.answer("Не расслышала 🙉 Попробуй еще раз.")
+        await status.edit_text("Не расслышала 🙉 Попробуй еще раз.")
         return None
-    await message.answer(f"🎙 <i>{escape(text)}</i>")
+    await status.edit_text(f"🎙 <i>{escape(text)}</i>")
     return text
 
 
