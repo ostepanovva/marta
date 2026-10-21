@@ -200,7 +200,11 @@ function draftCard(item, after) {
 async function renderToday() {
   const d = await api('/api/today');
   const parts = [];
-  if (d.quote) parts.push(card(h('p', { class: 'quote', text: d.quote })));
+  if (d.quote) {
+    parts.push(h('section', { class: 'quote-card', 'aria-label': 'Фраза дня' },
+      h('span', { class: 'quote-label', text: '☀️ Фраза дня' }),
+      h('p', { class: 'quote-text', text: d.quote })));
+  }
   if (d.drafts.length) parts.push(section('Ждет подтверждения', card(d.drafts.map((i) => draftCard(i, refresh)))));
   if (d.overdue.length) parts.push(section(`Просрочено · ${d.overdue.length}`, rows(d.overdue), { danger: true }));
   parts.push(section(`Сегодня · ${longDay(d.date)}`,

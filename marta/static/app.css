@@ -94,7 +94,18 @@ main {
 .card.pad { padding: 14px; }
 .empty { margin: 0; padding: 16px; color: var(--hint); font-size: 15px; }
 
-.quote { padding: 14px 16px; font-size: 15px; line-height: 21px; font-style: italic; }
+.quote-card {
+  position: relative; overflow: hidden;
+  padding: 14px 18px 16px; border-radius: 18px; background: var(--chip);
+}
+.quote-card::after {
+  content: "\201D"; position: absolute; right: 12px; top: -14px;
+  font: 700 96px/1 Georgia, "Times New Roman", serif; color: var(--accent); opacity: 0.18; pointer-events: none;
+}
+.quote-label {
+  font-size: 12px; line-height: 16px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+}
+.quote-text { position: relative; margin: 6px 0 0; font-size: 20px; line-height: 27px; font-weight: 700; text-wrap: pretty; }
 
 .row { display: flex; align-items: center; gap: 2px; padding: 2px 12px 2px 2px; border-bottom: 1px solid var(--line); }
 .row:last-child { border-bottom: none; }
