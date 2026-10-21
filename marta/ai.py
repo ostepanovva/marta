@@ -56,6 +56,7 @@ PARSE_FUNCTION = {
                         "date": {"type": "string", "description": "ГГГГ-ММ-ДД или пустая строка"},
                         "time": {"type": "string", "description": "ЧЧ:ММ или пустая строка"},
                         "recurrence": {"type": "string", "enum": list(RECURRENCES)},
+                        "amount": {"type": "number", "description": "Сумма платежа в рублях, если названа. Иначе 0"},
                     },
                     "required": ["kind", "title", "category"],
                 },
@@ -82,6 +83,10 @@ PARSE_RULES = """
 - Категории: {categories}.
   Платежи — то, что нужно оплатить, с напоминанием. Финансы — чеки, расходы, финансовые документы.
   Идеи — заметки и идеи. Покупки — список покупок.
+  Рекомендации — фильмы, сериалы, книги, музыка, места и ссылки, которые кому-то посоветовали;
+  такие записи обычно note без даты.
+- title не должен содержать ссылок: ссылка сохранится вместе с исходным сообщением.
+- amount — сумма для payment, если она названа: «4200», «4 200 ₽», «4,2 тыс.» → 4200. Нет суммы — 0.
 - date вычисляй по календарю выше: «завтра», «в пятницу», «25 числа» → ГГГГ-ММ-ДД. Нет даты — пустая строка.
 - time в 24-часовом формате: «в 3 дня» = 15:00, «в 8 вечера» = 20:00. Нет времени — пустая строка.
 - recurrence: «каждый день» — daily; «каждую неделю», «по понедельникам» — weekly;
@@ -129,8 +134,8 @@ class GigaChat:
         return self._token
 
     async def _chat(self, messages: list[dict], functions: list[dict] | None = None,
-                    function_call: dict | str | None = None) -> dict:
-        body: dict = {"model": self.model, "messages": messages, "temperature": 0.1}
+                    function_call: dict | str | None = None, temperature: float = 0.1) -> dict:
+        body: dict = {"model": self.model, "messages": messages, "temperature": temperature}
         if functions:
             body["functions"] = functions
             body["function_call"] = function_call or "auto"
@@ -182,6 +187,21 @@ class GigaChat:
         message = await self._chat([{"role": "system", "content": system}, {"role": "user", "content": question}])
         return (message.get("content") or "").strip()
 
+    async def quote(self, now: datetime, kind: str) -> str:
+        """Короткая фраза для утренней сводки. kind: support, motivation или quote."""
+        tasks = {
+            "support": "мягкую поддерживающую фразу: что можно не спешить и все получится",
+            "motivation": "бодрую мотивирующую фразу, чтобы взяться за дела с удовольствием",
+            "quote": "одну настоящую известную цитату о жизни, делах или времени и ее автора через тире",
+        }
+        prompt = (
+            f"Сегодня {WEEKDAYS[now.weekday()]}, {now:%d.%m}. Напиши для утреннего сообщения {tasks[kind]}. "
+            "Одно-два коротких предложения, на «ты», без приветствия, без кавычек вокруг всего текста, без эмодзи."
+        )
+        body = [{"role": "system", "content": PERSONA}, {"role": "user", "content": prompt}]
+        message = await self._chat(body, temperature=0.9)
+        return (message.get("content") or "").strip().strip("«»\"").strip()
+
     async def chat(self, text: str) -> str:
         message = await self._chat([{"role": "system", "content": PERSONA}, {"role": "user", "content": text}])
         return (message.get("content") or "").strip()
@@ -231,6 +251,17 @@ def _parse_time(value: str | None) -> tuple[int, int] | None:
     return (hours, minutes) if hours < 24 and minutes < 60 else None
 
 
+def _parse_amount(value) -> float | None:
+    """Сумма платежа: число больше нуля, иначе None."""
+    if isinstance(value, str):
+        value = value.replace("\u00a0", "").replace(" ", "").replace("₽", "").replace(",", ".")
+    try:
+        amount = round(float(value), 2)
+    except (TypeError, ValueError):
+        return None
+    return amount if 0 < amount < 100_000_000 else None
+
+
 def normalize_item(raw: dict, now: datetime, source: str) -> dict | None:
     """Проверяет и дополняет одну запись от ИИ. None — запись непригодна."""
     title = str(raw.get("title") or "").strip().rstrip(".")
@@ -259,6 +290,7 @@ def normalize_item(raw: dict, now: datetime, source: str) -> dict | None:
         "all_day": False,
         "offsets": [],
         "source": source,
+        "amount": _parse_amount(raw.get("amount")) if kind == "payment" else None,
     }
     day = _parse_date(raw.get("date"))
     if kind in ("note", "shopping") or day is None:
@@ -296,6 +328,8 @@ def describe_record(r: dict) -> str:
         parts.append(f"— {when} ({WEEKDAYS[due.weekday()]})")
     if r.get("recurrence", "none") != "none":
         parts.append(f"повтор: {r['recurrence']}")
+    if r.get("amount"):
+        parts.append(f"сумма: {r['amount']:g} ₽")
     return " ".join(parts)
 
 

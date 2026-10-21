@@ -5,6 +5,8 @@ services:
     build: .
     env_file: .env
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:18100:8080" # мини-приложение, доступно только Nginx на этом сервере
     volumes:
       - ./data:/data          # база данных Марты
       - whisper-models:/models # модель распознавания речи (скачивается один раз)

@@ -1,7 +1,7 @@
 """Кнопки Марты."""
 
 from aiogram.filters.callback_data import CallbackData
-from aiogram.types import InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from .config import CATEGORIES
@@ -106,4 +106,10 @@ def shopping_keyboard(items: list[dict]) -> InlineKeyboardMarkup:
     for item in items:
         kb.button(text=f"☐ {item['title']}", callback_data=ShopCb(id=item["id"]))
     kb.adjust(1)
+    return kb.as_markup()
+
+
+def webapp_keyboard(url: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📱 Открыть Марту", web_app=WebAppInfo(url=url))
     return kb.as_markup()

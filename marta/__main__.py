@@ -6,7 +6,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, MenuButtonCommands, MenuButtonWebApp, WebAppInfo
 
 from .ai import GigaChat
 from .config import load_settings
@@ -38,6 +38,8 @@ async def main() -> None:
 
     scheduler = build_scheduler(marta, bot)
     scheduler.start()
+    await marta.on_times_changed()  # время сводок могло быть изменено в приложении
+    runner = None
     try:
         # старая версия бота могла оставить вебхук — без его удаления опрос не заработает
         await bot.delete_webhook(drop_pending_updates=False)
@@ -46,14 +48,43 @@ async def main() -> None:
             BotCommand(command="help", description="Что умеет Марта"),
             BotCommand(command="confirm", description="Вкл/выкл подтверждение записей"),
         ])
+        runner = await start_webapp(marta, bot)
         logging.info("Марта запущена")
         prefetch = asyncio.create_task(marta.transcriber.prefetch())  # noqa: F841 — держим ссылку на задачу
         await dp.start_polling(bot)
     finally:
+        if runner:
+            await runner.cleanup()
         scheduler.shutdown(wait=False)
         await ai.close()
         await db.close()
         await bot.session.close()
+
+
+async def start_webapp(marta: Marta, bot: Bot):
+    """Запускает мини-приложение и ставит кнопку «Марта». Ошибка здесь не мешает работе бота."""
+    owner = marta.settings.owner_id
+    if not (marta.settings.webapp_enabled and marta.settings.webapp_url):
+        try:
+            await bot.set_chat_menu_button(chat_id=owner, menu_button=MenuButtonCommands())
+        except Exception:
+            logging.exception("Не удалось вернуть обычную кнопку меню")
+        return None
+    from . import webapp
+
+    try:
+        runner = await webapp.start(marta)
+    except Exception:
+        logging.exception("Мини-приложение не запустилось, бот работает без него")
+        return None
+    try:
+        await bot.set_chat_menu_button(
+            chat_id=owner,
+            menu_button=MenuButtonWebApp(text="Марта", web_app=WebAppInfo(url=marta.settings.webapp_url)),
+        )
+    except Exception:
+        logging.exception("Не удалось поставить кнопку мини-приложения")
+    return runner
 
 
 if __name__ == "__main__":

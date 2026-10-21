@@ -36,7 +36,7 @@ WELCOME = (
     "• «купить молоко и хлеб»\n"
     "• «во сколько у меня завтра врач?»\n\n"
     "Я разложу всё по категориям и напомню вовремя. "
-    "Утром в 9:00 пришлю план на день, вечером в 23:00 — итог."
+    "Утром в {morning} пришлю план на день, вечером в {evening} — итог."
 )
 
 HELP = (
@@ -45,13 +45,15 @@ HELP = (
     "• напоминаю о делах за день и за час, о платежах — за день и в день оплаты, "
     "о днях рождения — за 3 дня и в сам день;\n"
     "• отвечаю на вопросы о твоих планах;\n"
-    "• утром присылаю план, вечером — итог дня.\n\n"
+    "• утром присылаю план, вечером — итог дня.\n"
+    "Все то же самое есть на удобном экране — кнопка «Марта» слева от поля ввода.\n\n"
     "Команды:\n"
     "/confirm — включить или выключить подтверждение новых записей\n"
     "/help — эта подсказка"
 )
 
 AI_FAILED = "Ой, не получилось связаться с GigaChat 😕 Попробуй еще раз через минуту."
+WEBAPP_HINT = "Дела, календарь и списки — на удобном экране:"
 
 
 class Editing(StatesGroup):
@@ -74,23 +76,34 @@ class OwnerOnly(BaseMiddleware):
 # --- команды и меню ---
 
 
+async def send_webapp_button(message: Message, marta: Marta) -> None:
+    if marta.settings.webapp_enabled and marta.settings.webapp_url:
+        await message.answer(WEBAPP_HINT, reply_markup=kb.webapp_keyboard(marta.settings.webapp_url))
+
+
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext):
+async def cmd_start(message: Message, state: FSMContext, marta: Marta):
     await state.clear()
-    await message.answer(WELCOME, reply_markup=kb.main_menu())
+    morning, evening = await marta.summary_times()
+    await message.answer(WELCOME.format(morning=f"{morning:%H:%M}", evening=f"{evening:%H:%M}"),
+                         reply_markup=kb.main_menu())
+    await send_webapp_button(message, marta)
 
 
 @router.message(Command("help"))
-async def cmd_help(message: Message, state: FSMContext):
+async def cmd_help(message: Message, state: FSMContext, marta: Marta):
     await state.clear()
-    await message.answer(HELP, reply_markup=kb.main_menu())
+    help_text = HELP if marta.settings.webapp_enabled else HELP.replace(
+        "Все то же самое есть на удобном экране — кнопка «Марта» слева от поля ввода.\n", "")
+    await message.answer(help_text, reply_markup=kb.main_menu())
+    await send_webapp_button(message, marta)
 
 
 @router.message(Command("confirm"))
 async def cmd_confirm(message: Message, state: FSMContext, marta: Marta):
     await state.clear()
     enabled = not await marta.confirm_enabled()
-    await marta.db.set_setting("confirm", "1" if enabled else "0")
+    await marta.set_confirm(enabled)
     if enabled:
         await message.answer("Буду спрашивать подтверждение перед сохранением ✅")
     else:
@@ -193,6 +206,8 @@ async def edit_input(message: Message, state: FSMContext, bot: Bot, marta: Marta
         return
     new = parsed["items"][0]
     fields = {k: new[k] for k in ("kind", "title", "category", "tags", "due_at", "all_day", "recurrence", "offsets")}
+    # сумма могла быть задана в приложении и не попасть в текст — не теряем ее
+    fields["amount"] = new.get("amount") or (item.get("amount") if new["kind"] == "payment" else None)
     await marta.db.update_item(item["id"], source=combined, **fields)
     item = await marta.db.get_item(item["id"])
     await show_card(message, marta, item)
@@ -226,18 +241,12 @@ async def handle_text(message: Message, state: FSMContext, marta: Marta, text: s
         await message.answer(await marta.answer_question(text) or "Хм, не нашла ответа 🤔")
         return
     if parsed["items"]:
-        now = marta.now()
-        shopping = [i for i in parsed["items"] if i["kind"] == "shopping"]
-        others = [i for i in parsed["items"] if i["kind"] != "shopping"]
+        shopping, others = await marta.save_parsed(parsed["items"])
         if shopping:
-            for item in shopping:
-                await marta.db.add_item({**item, "status": "active"}, now)
             names = ", ".join(escape(i["title"].lower()) for i in shopping)
             await message.answer(f"🛒 Добавила в покупки: {names}")
-        confirm = await marta.confirm_enabled()
         for item in others:
-            item_id = await marta.db.add_item({**item, "status": "draft" if confirm else "active"}, now)
-            await show_card(message, marta, await marta.db.get_item(item_id))
+            await show_card(message, marta, item)
         return
     if parsed["clarify"]:
         await state.update_data(pending=text)
@@ -376,7 +385,9 @@ async def cb_browse(cb: CallbackQuery, callback_data: kb.BrowseCb, marta: Marta)
 
 @router.callback_query(kb.ShopCb.filter())
 async def cb_bought(cb: CallbackQuery, callback_data: kb.ShopCb, marta: Marta):
-    await marta.db.delete_item(callback_data.id)
+    item = await marta.db.get_item(callback_data.id)
+    if item and item["status"] == "active":
+        await marta.mark_bought(item)  # сутки видно зачеркнутым в приложении
     items = await marta.db.shopping()
     if items:
         await cb.message.edit_reply_markup(reply_markup=kb.shopping_keyboard(items))

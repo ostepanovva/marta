@@ -27,7 +27,8 @@ def build_scheduler(marta: Marta, bot: Bot) -> AsyncIOScheduler:
     async def morning() -> None:
         try:
             tasks, payments, birthdays = await marta.morning()
-            await bot.send_message(owner, morning_text(tasks, payments, birthdays, marta.now().date()))
+            quote = await marta.quote_of_day()
+            await bot.send_message(owner, morning_text(tasks, payments, birthdays, marta.now().date(), quote))
         except Exception:
             log.exception("Ошибка утренней сводки")
 
@@ -47,7 +48,16 @@ def build_scheduler(marta: Marta, bot: Bot) -> AsyncIOScheduler:
     s = marta.settings
     scheduler = AsyncIOScheduler(timezone=s.tz)
     scheduler.add_job(reminders, "cron", second=5, max_instances=1, coalesce=True)
-    scheduler.add_job(morning, "cron", hour=s.morning_at.hour, minute=s.morning_at.minute)
-    scheduler.add_job(evening, "cron", hour=s.evening_at.hour, minute=s.evening_at.minute)
+    scheduler.add_job(morning, "cron", id="morning", hour=s.morning_at.hour, minute=s.morning_at.minute)
+    scheduler.add_job(evening, "cron", id="evening", hour=s.evening_at.hour, minute=s.evening_at.minute)
     scheduler.add_job(nightly, "cron", hour=0, minute=5)
+
+    async def apply_times() -> None:
+        """Переносит сводки на время из настроек — сразу, без перезапуска."""
+        morning_at, evening_at = await marta.summary_times()
+        scheduler.reschedule_job("morning", trigger="cron", hour=morning_at.hour, minute=morning_at.minute)
+        scheduler.reschedule_job("evening", trigger="cron", hour=evening_at.hour, minute=evening_at.minute)
+        log.info("Сводки: утро в %s, вечер в %s", f"{morning_at:%H:%M}", f"{evening_at:%H:%M}")
+
+    marta.on_times_changed = apply_times
     return scheduler

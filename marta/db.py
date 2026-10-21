@@ -1,11 +1,14 @@
 """Хранилище Марты: один файл SQLite."""
 
 import json
+import logging
 from datetime import datetime, timedelta
 
 import aiosqlite
 
 from .timeutil import to_str
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
@@ -21,7 +24,8 @@ CREATE TABLE IF NOT EXISTS items (
     status      TEXT NOT NULL DEFAULT 'draft', -- draft, active, done
     source      TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL,
-    done_at     TEXT
+    done_at     TEXT,
+    amount      REAL                        -- сумма платежа в рублях
 );
 CREATE INDEX IF NOT EXISTS items_due ON items(status, due_at);
 
@@ -53,7 +57,8 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 """
 
-FIELDS = ("kind", "title", "category", "tags", "due_at", "all_day", "recurrence", "offsets", "status", "source")
+FIELDS = ("kind", "title", "category", "tags", "due_at", "all_day", "recurrence", "offsets", "status", "source",
+          "amount")
 
 
 def _row(row: aiosqlite.Row | None) -> dict | None:
@@ -74,7 +79,21 @@ class Database:
         self.conn = await aiosqlite.connect(self.path)
         self.conn.row_factory = aiosqlite.Row
         await self.conn.executescript(SCHEMA)
+        await self.migrate()
         await self.conn.commit()
+
+    async def migrate(self) -> None:
+        """Обновляет базу, созданную прошлыми версиями. Можно запускать сколько угодно раз."""
+        async with self.conn.execute("PRAGMA table_info(items)") as cur:
+            columns = {row["name"] for row in await cur.fetchall()}
+        if "amount" not in columns:
+            await self.conn.execute("ALTER TABLE items ADD COLUMN amount REAL")
+            log.info("База: добавлено поле «сумма»")
+        # категорию «Дети» заменили на «Рекомендации», старые записи переезжают в «Дом»
+        cur = await self.conn.execute("UPDATE items SET category = 'Дом' WHERE category = 'Дети'")
+        if cur.rowcount:
+            log.info("База: %s записей из «Дети» перенесены в «Дом»", cur.rowcount)
+        await self.conn.execute("UPDATE category_examples SET category = 'Дом' WHERE category = 'Дети'")
 
     async def close(self) -> None:
         if self.conn:
@@ -150,6 +169,26 @@ class Database:
     async def shopping(self) -> list[dict]:
         return await self._all("SELECT * FROM items WHERE status = 'active' AND kind = 'shopping' ORDER BY id")
 
+    async def shopping_bought(self, since: datetime) -> list[dict]:
+        return await self._all(
+            "SELECT * FROM items WHERE status = 'done' AND kind = 'shopping' AND done_at >= ? ORDER BY done_at DESC",
+            to_str(since),
+        )
+
+    async def drafts(self) -> list[dict]:
+        return await self._all("SELECT * FROM items WHERE status = 'draft' AND kind != 'shopping' ORDER BY id")
+
+    async def notes(self) -> list[dict]:
+        return await self._all("SELECT * FROM items WHERE status = 'active' AND kind = 'note' ORDER BY id DESC")
+
+    async def payments(self) -> list[dict]:
+        return await self._all(
+            "SELECT * FROM items WHERE status = 'active' AND kind = 'payment' ORDER BY due_at IS NULL, due_at"
+        )
+
+    async def active_items(self) -> list[dict]:
+        return await self._all("SELECT * FROM items WHERE status = 'active' ORDER BY due_at IS NULL, due_at, id DESC")
+
     async def context_items(self, start: datetime, end: datetime) -> list[dict]:
         """Записи, которые ИИ видит, когда отвечает на вопросы о планах."""
         return await self._all(
@@ -171,6 +210,15 @@ class Database:
     async def completions_between(self, start: datetime, end: datetime) -> list[dict]:
         return await self._all(
             "SELECT * FROM completions WHERE done_at >= ? AND done_at < ? ORDER BY done_at",
+            to_str(start), to_str(end),
+        )
+
+    async def paid_between(self, start: datetime, end: datetime) -> list[dict]:
+        """Оплаченные платежи с текущей суммой платежа."""
+        return await self._all(
+            "SELECT c.id, c.item_id, c.title, c.done_at, i.amount, i.recurrence FROM completions c "
+            "JOIN items i ON i.id = c.item_id "
+            "WHERE i.kind = 'payment' AND c.done_at >= ? AND c.done_at < ? ORDER BY c.done_at DESC",
             to_str(start), to_str(end),
         )
 
@@ -220,6 +268,11 @@ class Database:
         """Удаляет выполненное и прошедшее старше keep_days дней и забытые черновики."""
         edge = to_str(now - timedelta(days=keep_days))
         await self.conn.execute("DELETE FROM items WHERE status = 'done' AND done_at < ?", (edge,))
+        # купленное видно зачеркнутым сутки, потом исчезает
+        await self.conn.execute(
+            "DELETE FROM items WHERE kind = 'shopping' AND status = 'done' AND done_at < ?",
+            (to_str(now - timedelta(days=1)),),
+        )
         await self.conn.execute(
             "DELETE FROM items WHERE status = 'active' AND recurrence = 'none' "
             "AND kind IN ('task', 'payment') AND due_at < ?",

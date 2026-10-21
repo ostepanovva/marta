@@ -10,7 +10,7 @@ CATEGORIES = [
     "Дом",
     "Здоровье",
     "Финансы",
-    "Дети",
+    "Рекомендации",
     "Покупки",
     "Учеба",
     "Идеи",
@@ -46,6 +46,9 @@ class Settings:
     morning_at: time
     evening_at: time
     keep_days: int
+    webapp_enabled: bool = False
+    webapp_url: str = ""
+    webapp_port: int = 8080
 
 
 def load_settings() -> Settings:
@@ -63,4 +66,7 @@ def load_settings() -> Settings:
         morning_at=_time("MORNING_AT", "09:00"),
         evening_at=_time("EVENING_AT", "23:00"),
         keep_days=int(os.getenv("KEEP_DAYS", "30")),
+        webapp_enabled=os.getenv("WEBAPP_ENABLED", "0").strip() == "1",
+        webapp_url=os.getenv("WEBAPP_URL", "").strip().rstrip("/"),
+        webapp_port=int(os.getenv("WEBAPP_PORT", "8080")),
     )
