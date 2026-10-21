@@ -19,6 +19,9 @@ from .speech import Transcriber
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # без этого журнал забит записями о ежеминутной проверке напоминаний
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     settings = load_settings()
 
     db = Database(settings.db_path)
