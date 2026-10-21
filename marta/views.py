@@ -151,7 +151,7 @@ def morning_text(today_items: list[dict], payments: list[dict], birthdays: list[
                  quote: str = "") -> str:
     lines = ["☀️ <b>Доброе утро!</b>"]
     if quote:
-        lines.append(f"<i>{escape(quote)}</i>\n")
+        lines.append(f"<i>{escape(quote)}</i>")
     if today_items:
         lines.append("\n<b>Сегодня:</b>")
         lines += [item_line(i, today) for i in today_items]

@@ -120,7 +120,9 @@ def test_amount_from_ai_and_texts():
     note = {"kind": "note", "title": "Фильм «Достать ножи»", "category": "Рекомендации", "tags": "",
             "source": "Лена советует https://www.kinopoisk.ru/film/1188529/.", "recurrence": "none", "offsets": []}
     assert "🔗 https://www.kinopoisk.ru/film/1188529/" in card_text(note, NOW.date())
-    assert morning_text([], [], [], NOW.date(), "Начни с малого").startswith("☀️ <b>Доброе утро!</b>\n<i>Начни с малого</i>")
+    text = morning_text([{"kind": "task", "title": "Врач", "category": "Здоровье", "due_at": "2026-10-21 15:00",
+                          "all_day": 0}], [], [], NOW.date(), "Начни с малого")
+    assert text.startswith("☀️ <b>Доброе утро!</b>\n<i>Начни с малого</i>\n\n<b>Сегодня:</b>")
 
 
 def test_form_rules():
