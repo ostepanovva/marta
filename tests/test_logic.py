@@ -128,3 +128,28 @@ def test_card_text_for_draft():
             "recurrence": "none", "offsets": [DAY, 60], "tags": "врач"}
     text = card_text(item, NOW.date())
     assert "пт, 23 окт в 15:00" in text and "за день и за час" in text and "#врач" in text
+
+
+def test_relative_day_safety_net():
+    night = datetime(2026, 10, 22, 0, 17)  # после полуночи «завтра» — это 23-е
+    # GigaChat ошибся: заметка без даты в «Рекомендациях»
+    raw = {"intent": "create", "items": [{"kind": "note", "title": "Поздравление Тане", "category": "Рекомендации"}]}
+    item = normalize_parse(raw, night, "Завтра утром отправить поздравление Тане")["items"][0]
+    assert (item["kind"], item["category"], item["due_at"], item["all_day"]) == ("task", "Дом", "2026-10-23 09:00", False)
+    assert item["offsets"] == [DAY, 60]
+
+    raw = {"intent": "create", "items": [{"kind": "note", "title": "Фильм «Достать ножи»", "category": "Рекомендации"}]}
+    item = normalize_parse(raw, night, "Сегодня Лена посоветовала фильм Достать ножи")["items"][0]
+    assert (item["kind"], item["due_at"]) == ("note", None)
+
+    raw = {"intent": "create", "items": [{"kind": "task", "title": "Позвонить маме", "category": "Дом"}]}
+    item = normalize_parse(raw, night, "послезавтра вечером позвонить маме")["items"][0]
+    assert item["due_at"] == "2026-10-24 19:00"
+
+    # дату, которую поставил ИИ, не трогаем; в исправлении смотрим только на само исправление
+    raw = {"intent": "create", "items": [{"kind": "task", "title": "Врач", "category": "Здоровье"}]}
+    item = normalize_parse(raw, night, "завтра к врачу\nИсправление: без даты")["items"][0]
+    assert item["due_at"] is None
+    raw = {"intent": "create", "items": [{"kind": "task", "title": "Врач", "category": "Здоровье",
+                                          "date": "2026-10-30", "time": "15:00"}]}
+    assert normalize_parse(raw, night, "завтра к врачу")["items"][0]["due_at"] == "2026-10-30 15:00"

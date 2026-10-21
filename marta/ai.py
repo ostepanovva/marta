@@ -83,12 +83,16 @@ PARSE_RULES = """
 - Категории: {categories}.
   Платежи — то, что нужно оплатить, с напоминанием. Финансы — чеки, расходы, финансовые документы.
   Идеи — заметки и идеи. Покупки — список покупок.
-  Рекомендации — фильмы, сериалы, книги, музыка, места и ссылки, которые кому-то посоветовали;
-  такие записи обычно note без даты.
+  Рекомендации — только то, что владельцу кто-то посоветовал, или фильм, сериал, книга, музыка, место
+  или ссылка, чтобы посмотреть, прочитать или послушать позже. Поздравления, звонки, встречи и дела
+  для других людей — не Рекомендации.
+- Если в сообщении есть срок — «сегодня», «завтра», «послезавтра», день недели, число — это task
+  (или payment, birthday), а не note, и date обязательно заполни. note — только когда срока нет совсем.
 - title не должен содержать ссылок: ссылка сохранится вместе с исходным сообщением.
 - amount — сумма для payment, если она названа: «4200», «4 200 ₽», «4,2 тыс.» → 4200. Нет суммы — 0.
 - date вычисляй по календарю выше: «завтра», «в пятницу», «25 числа» → ГГГГ-ММ-ДД. Нет даты — пустая строка.
-- time в 24-часовом формате: «в 3 дня» = 15:00, «в 8 вечера» = 20:00. Нет времени — пустая строка.
+- time в 24-часовом формате: «в 3 дня» = 15:00, «в 8 вечера» = 20:00. «Утром» без точного времени — 09:00,
+  «днем» — 13:00, «вечером» — 19:00. Нет времени — пустая строка.
 - recurrence: «каждый день» — daily; «каждую неделю», «по понедельникам» — weekly;
   «каждый месяц», «ежемесячно» — monthly; «каждый год» и все дни рождения — yearly; иначе none.
 - tags — 1–3 коротких слова для поиска, без #.
@@ -262,6 +266,35 @@ def _parse_amount(value) -> float | None:
     return amount if 0 < amount < 100_000_000 else None
 
 
+RELATIVE_DAYS = ((re.compile(r"\bпослезавтра\b"), 2), (re.compile(r"\bзавтра\b"), 1), (re.compile(r"\bсегодня\b"), 0))
+PART_OF_DAY = ((re.compile(r"\bутром\b"), (9, 0)), (re.compile(r"\bдн[её]м\b"), (13, 0)),
+               (re.compile(r"\bвечером\b"), (19, 0)))
+RECOMMEND_RE = re.compile(r"совет|рекоменд|фильм|сериал|книг|музык|песн|альбом|подкаст|посмотреть|прочитать|"
+                          r"послушать|https?://")
+
+
+def _own_words(source: str) -> str:
+    """Слова владельца; при исправлении — только само исправление."""
+    return source.rsplit("Исправление:", 1)[-1].lower().replace("ё", "е")
+
+
+def _relative_day(source: str, now: datetime) -> date | None:
+    """Страховка, если ИИ не поставил дату: «сегодня», «завтра», «послезавтра»."""
+    text = _own_words(source)
+    for pattern, shift in RELATIVE_DAYS:
+        if pattern.search(text):
+            return now.date() + timedelta(days=shift)
+    return None
+
+
+def _part_of_day(source: str) -> tuple[int, int] | None:
+    text = _own_words(source)
+    for pattern, clock in PART_OF_DAY:
+        if pattern.search(text):
+            return clock
+    return None
+
+
 def normalize_item(raw: dict, now: datetime, source: str) -> dict | None:
     """Проверяет и дополняет одну запись от ИИ. None — запись непригодна."""
     title = str(raw.get("title") or "").strip().rstrip(".")
@@ -293,12 +326,25 @@ def normalize_item(raw: dict, now: datetime, source: str) -> dict | None:
         "amount": _parse_amount(raw.get("amount")) if kind == "payment" else None,
     }
     day = _parse_date(raw.get("date"))
-    if kind in ("note", "shopping") or day is None:
+    guessed = False
+    if day is None and kind != "shopping":
+        day = _relative_day(source, now)
+        guessed = day is not None
+        if guessed and kind == "note" and RECOMMEND_RE.search(_own_words(source)):
+            day, guessed = None, False  # «сегодня посоветовали фильм» — это рекомендация, а не дело
+    if kind == "note" and day is not None:
+        # у заметки появился срок — это дело с напоминанием, как в приложении
+        kind = item["kind"] = "task"
+        if guessed and category in ("Рекомендации", "Идеи") and not RECOMMEND_RE.search(_own_words(source)):
+            category = item["category"] = DEFAULT_CATEGORY["task"]
+    if kind == "shopping" or day is None:
         if kind in ("note", "shopping"):
             item["recurrence"] = "none"
         return item
 
     clock = _parse_time(raw.get("time"))
+    if clock is None and kind != "birthday":
+        clock = _part_of_day(source)
     all_day = clock is None or kind == "birthday"
     hours, minutes = ALL_DAY_TIME if all_day else clock
     due = datetime(day.year, day.month, day.day, hours, minutes)
