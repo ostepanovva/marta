@@ -47,9 +47,10 @@ class Transcriber:
 
     async def transcribe(self, path: str) -> str:
         async with self._lock:
-            text = await asyncio.to_thread(self._run, path)
-            self._last_used = time.monotonic()
-            return text
+            try:
+                return await asyncio.to_thread(self._run, path)
+            finally:
+                self._last_used = time.monotonic()
 
     async def unload_if_idle(self) -> None:
         async with self._lock:
