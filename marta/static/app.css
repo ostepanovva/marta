@@ -8,6 +8,7 @@
   --fb-accent: #1f6fb5;
   --fb-danger: #c0392b;
   --fb-line: #e3e3e8;
+  --fb-btn: #1f6fb5;
   color-scheme: light;
 }
 
@@ -19,6 +20,7 @@
   --fb-accent: #6ab3f3;
   --fb-danger: #ff8a7a;
   --fb-line: #2a3746;
+  --fb-btn: #2b6aa3;
   color-scheme: dark;
 }
 
@@ -28,7 +30,7 @@
   --text: var(--tg-theme-text-color, var(--fb-text));
   --hint: var(--tg-theme-subtitle-text-color, var(--tg-theme-hint-color, var(--fb-hint)));
   --accent: var(--tg-theme-link-color, var(--fb-accent));
-  --btn: var(--tg-theme-button-color, var(--fb-accent));
+  --btn: var(--tg-theme-button-color, var(--fb-btn));
   --btn-text: var(--tg-theme-button-text-color, #ffffff);
   --danger: var(--tg-theme-destructive-text-color, var(--fb-danger));
   --line: var(--tg-theme-section-separator-color, var(--fb-line));
