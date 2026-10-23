@@ -152,4 +152,17 @@ def test_relative_day_safety_net():
     assert item["due_at"] is None
     raw = {"intent": "create", "items": [{"kind": "task", "title": "Врач", "category": "Здоровье",
                                           "date": "2026-10-30", "time": "15:00"}]}
-    assert normalize_parse(raw, night, "завтра к врачу")["items"][0]["due_at"] == "2026-10-30 15:00"
+    assert normalize_parse(raw, night, "к врачу 30-го в 15")["items"][0]["due_at"] == "2026-10-30 15:00"
+    assert normalize_parse(raw, night, "завтра к врачу")["items"][0]["due_at"] == "2026-10-23 15:00"  # слова важнее
+
+
+def test_said_day_wins_over_ai_date():
+    morning = datetime(2026, 10, 23, 8, 55)
+    wrong = {"intent": "create", "items": [{"kind": "task", "title": "Подготовить договор с Medcom", "category": "Работа",
+                                            "date": "2026-10-24"}]}
+    item = normalize_parse(wrong, morning, "Сегодня подготовь договор с компанией Medcom.")["items"][0]
+    assert item["due_at"] == "2026-10-23 09:00"
+    # названа другая дата или два разных дня — решает GigaChat
+    for text in ("сегодня решить, что в пятницу везем договор", "сегодня купить хлеб, а завтра отвезти договор",
+                 "сегодня договориться о встрече 24 октября"):
+        assert normalize_parse(wrong, morning, text)["items"][0]["due_at"] == "2026-10-24 09:00", text

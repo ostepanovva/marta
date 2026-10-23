@@ -287,6 +287,21 @@ def _relative_day(source: str, now: datetime) -> date | None:
     return None
 
 
+OTHER_DATE_RE = re.compile(
+    r"понедельник|вторник|\bсред[ауы]\b|четверг|пятниц|суббот|воскресень|январ|феврал|\bмарт|апрел|\bма[йя]\b|"
+    r"\bиюн|\bиюл|август|сентябр|октябр|ноябр|декабр|числ|\d{1,2}\s*-?го\b|\d{1,2}[./]\d{1,2}|\bчерез\b"
+)
+
+
+def _said_day(source: str, now: datetime) -> date | None:
+    """День, который владелец назвал прямо («сегодня», «завтра», «послезавтра»), если другой даты в тексте нет."""
+    text = _own_words(source)
+    named = [shift for pattern, shift in RELATIVE_DAYS if pattern.search(text)]
+    if len(named) != 1 or OTHER_DATE_RE.search(text):
+        return None
+    return now.date() + timedelta(days=named[0])
+
+
 def _part_of_day(source: str) -> tuple[int, int] | None:
     text = _own_words(source)
     for pattern, clock in PART_OF_DAY:
@@ -326,6 +341,11 @@ def normalize_item(raw: dict, now: datetime, source: str) -> dict | None:
         "amount": _parse_amount(raw.get("amount")) if kind == "payment" else None,
     }
     day = _parse_date(raw.get("date"))
+    said = _said_day(source, now)
+    if day is not None and said is not None and day != said and kind != "birthday":
+        # GigaChat иногда сдвигает «сегодня» на завтра — слова владельца важнее
+        log.info("Дата %s от GigaChat заменена на %s: так сказано в сообщении", day, said)
+        day = said
     guessed = False
     if day is None and kind != "shopping":
         day = _relative_day(source, now)
