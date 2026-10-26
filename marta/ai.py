@@ -334,6 +334,29 @@ def _said_weekday(source: str, now: datetime) -> tuple[int, date] | None:
     return index, now.date() + timedelta(days=shift)
 
 
+CLOCK_RE = re.compile(r"(?:^|\s)(?:в|к|на)\s*(\d{1,2})[:.](\d{2})(?!\d|\.\d)")  # точка в конце фразы не мешает
+HOURS_RE = re.compile(r"(?:^|\s)(?:в|к)\s*(\d{1,2})\s*(?:час[а-я]*\s*)?(утра|дня|вечера|ночи)")
+
+
+def _said_time(source: str) -> tuple[int, int] | None:
+    """Время, названное прямо: «в 11.30», «в 11:30», «в 8 вечера». Два разных времени — не угадываем."""
+    text = _own_words(source)
+    found = set()
+    for match in CLOCK_RE.finditer(text):
+        found.add((int(match.group(1)), int(match.group(2))))
+    for match in HOURS_RE.finditer(text):
+        hours, part = int(match.group(1)), match.group(2)
+        if part in ("дня", "вечера") and hours < 12:
+            hours += 12
+        elif part == "ночи" and hours == 12:
+            hours = 0
+        found.add((hours, 0))
+    if len(found) != 1:
+        return None
+    hours, minutes = found.pop()
+    return (hours, minutes) if hours < 24 and minutes < 60 else None
+
+
 def _part_of_day(source: str) -> tuple[int, int] | None:
     text = _own_words(source)
     for pattern, clock in PART_OF_DAY:
@@ -402,6 +425,12 @@ def normalize_item(raw: dict, now: datetime, source: str) -> dict | None:
         return item
 
     clock = _parse_time(raw.get("time"))
+    said_time = _said_time(source) if kind != "birthday" else None
+    if said_time and said_time != clock:
+        # GigaChat иногда теряет или путает время — названное прямо важнее
+        if clock is not None:
+            log.info("Время %s от GigaChat заменено на %s: так сказано в сообщении", clock, said_time)
+        clock = said_time
     if clock is None and kind != "birthday":
         clock = _part_of_day(source)
     all_day = clock is None or kind == "birthday"
