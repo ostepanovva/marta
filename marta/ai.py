@@ -287,19 +287,51 @@ def _relative_day(source: str, now: datetime) -> date | None:
     return None
 
 
-OTHER_DATE_RE = re.compile(
-    r"понедельник|вторник|\bсред[ауы]\b|четверг|пятниц|суббот|воскресень|январ|феврал|\bмарт|апрел|\bма[йя]\b|"
-    r"\bиюн|\bиюл|август|сентябр|октябр|ноябр|декабр|числ|\d{1,2}\s*-?го\b|\d{1,2}[./]\d{1,2}|\bчерез\b"
+WEEKDAY_WORDS = (
+    (re.compile(r"понедельник"), 0), (re.compile(r"вторник"), 1), (re.compile(r"\bсред[ауы]\b"), 2),
+    (re.compile(r"четверг"), 3), (re.compile(r"пятниц"), 4), (re.compile(r"суббот"), 5), (re.compile(r"воскресень"), 6),
 )
+MONTHS_RE = r"(январ|феврал|март|апрел|ма[йяе]|июн|июл|август|сентябр|октябр|ноябр|декабр)"
+# месяц — дата, только если перед ним число («5 марта») или «в марте»: иначе «Марта» — это имя
+DATE_WORDS_RE = re.compile(
+    rf"\d{{1,2}}\s*{MONTHS_RE}|(^|\s)во?\s+{MONTHS_RE}|числ|\d{{1,2}}\s*-?го\b|\bчерез\b"
+)
+DOTTED_RE = re.compile(r"(?<![\d.])(\d{1,2})[./](\d{1,2})(?![\d.])")
+
+
+def _has_exact_date(text: str) -> bool:
+    """Названо ли точное число: «5 ноября», «25 числа», «10.11». «в 11.30» — это время, а не дата."""
+    if DATE_WORDS_RE.search(text):
+        return True
+    for match in DOTTED_RE.finditer(text):
+        is_time = re.search(r"(^|\s)(в|к|до|с|после)\s*$", text[:match.start()]) or int(match.group(2)) > 12
+        if not is_time:
+            return True
+    return False
 
 
 def _said_day(source: str, now: datetime) -> date | None:
     """День, который владелец назвал прямо («сегодня», «завтра», «послезавтра»), если другой даты в тексте нет."""
     text = _own_words(source)
     named = [shift for pattern, shift in RELATIVE_DAYS if pattern.search(text)]
-    if len(named) != 1 or OTHER_DATE_RE.search(text):
+    weekday = any(pattern.search(text) for pattern, _ in WEEKDAY_WORDS)
+    if len(named) != 1 or weekday or _has_exact_date(text):
         return None
     return now.date() + timedelta(days=named[0])
+
+
+def _said_weekday(source: str, now: datetime) -> tuple[int, date] | None:
+    """День недели, названный без точного числа: (номер дня, ближайшая такая дата)."""
+    text = _own_words(source)
+    named = {index for pattern, index in WEEKDAY_WORDS if pattern.search(text)}
+    relative = any(pattern.search(text) for pattern, _ in RELATIVE_DAYS)
+    if len(named) != 1 or relative or _has_exact_date(text):
+        return None
+    index = named.pop()
+    shift = (index - now.weekday()) % 7 or 7  # в четверг, сказанное в четверг, — через неделю
+    if "следующ" in text and shift < 7:
+        shift += 7
+    return index, now.date() + timedelta(days=shift)
 
 
 def _part_of_day(source: str) -> tuple[int, int] | None:
@@ -347,6 +379,13 @@ def normalize_item(raw: dict, now: datetime, source: str) -> dict | None:
         log.info("Дата %s от GigaChat заменена на %s: так сказано в сообщении", day, said)
         day = said
     guessed = False
+    weekday = _said_weekday(source, now) if kind not in ("shopping", "birthday") else None
+    if weekday and (day is None or day.weekday() != weekday[0]):
+        # GigaChat иногда путает дни недели: «в четверг» — это ближайший четверг
+        if day is not None:
+            log.info("Дата %s от GigaChat заменена на %s: в сообщении назван день недели", day, weekday[1])
+        guessed = day is None
+        day = weekday[1]
     if day is None and kind != "shopping":
         day = _relative_day(source, now)
         guessed = day is not None
