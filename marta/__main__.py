@@ -56,6 +56,7 @@ async def main() -> None:
         if runner:
             await runner.cleanup()
         scheduler.shutdown(wait=False)
+        marta.transcriber.close()
         await ai.close()
         await db.close()
         await bot.session.close()

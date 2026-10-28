@@ -101,6 +101,21 @@ PARSE_RULES = """
 """.strip()
 
 
+QUOTE_TASKS = {
+    "great": "одну настоящую известную мысль великого человека (писателя, ученого, философа, путешественника) "
+             "и после тире его имя",
+    "proverb": "одну настоящую пословицу или поговорку — русскую или другого народа — и после тире, чья она",
+    "inspiration": "короткую вдохновляющую фразу своими словами, на «ты»",
+    "support": "мягкую поддерживающую фразу на «ты»: можно не спешить, все получится",
+    "motivation": "бодрую мотивирующую фразу на «ты», чтобы взяться за дела с удовольствием",
+}
+QUOTE_THEMES = (
+    "маленькие шаги", "смелость", "время", "благодарность", "отдых", "любопытство", "дружба", "терпение",
+    "радость простых вещей", "начало нового", "упорство", "доброта", "порядок в делах", "мечты", "семья",
+    "природа и времена года", "учеба", "здоровье", "спокойствие", "юмор", "путешествия", "творчество",
+)
+
+
 class AIError(Exception):
     pass
 
@@ -191,19 +206,18 @@ class GigaChat:
         message = await self._chat([{"role": "system", "content": system}, {"role": "user", "content": question}])
         return (message.get("content") or "").strip()
 
-    async def quote(self, now: datetime, kind: str) -> str:
-        """Короткая фраза для утренней сводки. kind: support, motivation или quote."""
-        tasks = {
-            "support": "мягкую поддерживающую фразу: что можно не спешить и все получится",
-            "motivation": "бодрую мотивирующую фразу, чтобы взяться за дела с удовольствием",
-            "quote": "одну настоящую известную цитату о жизни, делах или времени и ее автора через тире",
-        }
+    async def quote(self, now: datetime, kind: str, theme: str, avoid: list[str]) -> str:
+        """Короткая фраза для утренней сводки. kind — вид фразы (QUOTE_TASKS), theme — тема, avoid — недавние фразы."""
+        recent = "\n".join(f"- {q}" for q in avoid[-15:])
         prompt = (
-            f"Сегодня {WEEKDAYS[now.weekday()]}, {now:%d.%m}. Напиши для утреннего сообщения {tasks[kind]}. "
-            "Одно-два коротких предложения, на «ты», без приветствия, без кавычек вокруг всего текста, без эмодзи."
+            f"Сегодня {WEEKDAYS[now.weekday()]}, {now:%d.%m}. Напиши для утреннего сообщения {QUOTE_TASKS[kind]}. "
+            f"Тема: {theme}. Одно-два коротких предложения, без приветствия, без кавычек вокруг всего текста, "
+            "без эмодзи."
         )
+        if recent:
+            prompt += f"\nЭти фразы уже были, не повторяй их и не пиши похожие:\n{recent}"
         body = [{"role": "system", "content": PERSONA}, {"role": "user", "content": prompt}]
-        message = await self._chat(body, temperature=0.9)
+        message = await self._chat(body, temperature=1.0)
         return (message.get("content") or "").strip().strip("«»\"").strip()
 
     async def chat(self, text: str) -> str:

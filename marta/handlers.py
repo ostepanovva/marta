@@ -15,6 +15,7 @@ from . import keyboards as kb
 from .ai import AIError
 from .config import CATEGORIES
 from .service import Marta
+from .speech import TranscribeError
 from .views import (
     MENU_CATEGORIES,
     MENU_IDEAS,
@@ -173,6 +174,10 @@ async def message_text(message: Message, bot: Bot, marta: Marta) -> str | None:
     try:
         await bot.download(message.voice, destination=path)
         text = await marta.transcriber.transcribe(path)
+    except TranscribeError:
+        await status.edit_text("Не получилось расшифровать голосовое 😕 Отправь его еще раз — я уже перезапустила "
+                               "распознавание. Или напиши текстом.")
+        return None
     except Exception:
         log.exception("Не удалось расшифровать голосовое")
         await status.edit_text("Не получилось расшифровать голосовое 😕 Напиши текстом, а я пока разберусь.")

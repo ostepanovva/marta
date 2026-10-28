@@ -1,6 +1,7 @@
 FROM python:3.12-slim
 
-ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+# PYTHONFAULTHANDLER: если программа упадет, в журнале будет видно, где именно
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PYTHONFAULTHANDLER=1
 
 # Корневой сертификат Минцифры — без него GigaChat API не примет соединение
 RUN apt-get update \

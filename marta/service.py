@@ -1,12 +1,13 @@
 """Логика Марты, общая для бота, расписания и мини-приложения."""
 
 import asyncio
+import json
 import logging
 import random
 import re
 from datetime import date, datetime, time, timedelta
 
-from .ai import GigaChat, context_window
+from .ai import QUOTE_THEMES, GigaChat, context_window
 from .config import CATEGORIES, Settings
 from .db import Database
 from .speech import Transcriber
@@ -16,8 +17,10 @@ from .views import QUOTES
 log = logging.getLogger(__name__)
 
 REMINDER_GRACE = timedelta(hours=6)  # если сервер перезапускался, догоняем пропущенное за 6 часов
-QUOTE_KINDS = ("support", "motivation", "quote")
+QUOTE_KINDS = ("great", "inspiration", "proverb", "support", "great", "motivation", "proverb")  # по дням
 QUOTE_TIMEOUT = 20  # секунд ждем GigaChat утром, потом берем запасную фразу
+QUOTE_TRIES = 3     # столько раз просим GigaChat, если он повторил старую фразу
+QUOTE_MEMORY = 120  # столько последних фраз помним, чтобы не повторяться
 RECURRENCES = ("none", "daily", "weekly", "monthly", "yearly")
 KINDS = ("task", "payment", "birthday", "note")
 OFFSET_CHOICES = (3 * 24 * 60, 24 * 60, 60, 0)
@@ -69,21 +72,37 @@ class Marta:
     # --- фраза дня ---
 
     async def quote_of_day(self, generate: bool = True) -> str:
-        """Фраза для утренней сводки, одна на весь день. Без generate GigaChat не спрашиваем."""
+        """Фраза для утренней сводки, одна на весь день и не похожая на недавние. Без generate GigaChat не спрашиваем."""
         today = self.now().date().isoformat()
         if await self.db.get_setting("quote_date", "") == today:
             return await self.db.get_setting("quote_text", "")
+        try:
+            history = json.loads(await self.db.get_setting("quote_history", "[]"))
+        except ValueError:
+            history = []
+        if not history and await self.db.get_setting("quote_text", ""):
+            history = [await self.db.get_setting("quote_text", "")]  # прошлая фраза до появления истории
+        rnd = random.Random(today)
         text = ""
         if generate and self.ai is not None:
             kind = QUOTE_KINDS[self.now().toordinal() % len(QUOTE_KINDS)]
-            try:
-                text = await asyncio.wait_for(self.ai.quote(self.now(), kind), QUOTE_TIMEOUT)
-            except Exception:
-                log.warning("GigaChat не прислал фразу дня, беру запасную")
-            if len(text) > 300:
+            themes = rnd.sample(QUOTE_THEMES, QUOTE_TRIES)
+            for theme in themes:
+                try:
+                    text = await asyncio.wait_for(self.ai.quote(self.now(), kind, theme, history), QUOTE_TIMEOUT)
+                except Exception:
+                    log.warning("GigaChat не прислал фразу дня, беру запасную")
+                    text = ""
+                    break
+                if 0 < len(text) <= 300 and not is_repeat(text, history):
+                    break
+                log.info("Фраза дня от GigaChat повторяет недавнюю, прошу другую")
                 text = ""
         if not text:
-            text = random.Random(today).choice(QUOTES)
+            fresh = [q for q in QUOTES if not is_repeat(q, history)] or QUOTES
+            text = rnd.choice(fresh)
+        history = (history + [text])[-QUOTE_MEMORY:]
+        await self.db.set_setting("quote_history", json.dumps(history, ensure_ascii=False))
         await self.db.set_setting("quote_date", today)
         await self.db.set_setting("quote_text", text)
         return text
@@ -348,3 +367,20 @@ def parse_amount(value) -> float | None:
     if amount < 0 or amount >= 100_000_000:
         raise InvalidInput("Сумма выглядит странно")
     return amount or None
+
+
+def _quote_words(text: str) -> set[str]:
+    text = text.split(" — ")[0].lower().replace("ё", "е")  # без автора
+    return {w for w in re.findall(r"[а-яa-z]+", text) if len(w) > 2}
+
+
+def is_repeat(text: str, history: list[str]) -> bool:
+    """Та же или почти та же фраза уже была: совпадает больше 60% значимых слов."""
+    words = _quote_words(text)
+    if not words:
+        return False
+    for old in history:
+        old_words = _quote_words(old)
+        if old_words and len(words & old_words) / len(words | old_words) > 0.6:
+            return True
+    return False

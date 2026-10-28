@@ -43,7 +43,7 @@ class FakeAI:
     async def answer(self, question, now, records):
         return "Сантехник завтра в 10:00"
 
-    async def quote(self, now, kind):
+    async def quote(self, now, kind, theme, avoid):
         raise RuntimeError("нет связи")
 
 
@@ -249,6 +249,42 @@ def test_api_flow():
             assert (await client.delete(f"/api/items/{bread}", headers=owner)).status == 404
         finally:
             await client.close()
+            await marta.db.close()
+
+    run(scenario())
+
+
+class RepeatingAI(FakeAI):
+    """GigaChat, который любит одну и ту же фразу."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+
+    async def quote(self, now, kind, theme, avoid):
+        self.calls.append((kind, theme, list(avoid)))
+        if len(self.calls) % 4 == 0:
+            return f"Новая мысль про {theme} — Сенека"
+        return "Не торопись, всё сложится как надо!"
+
+
+def test_quote_of_day_does_not_repeat():
+    async def scenario():
+        ai = RepeatingAI()
+        marta = await make_marta(ai)
+        try:
+            await marta.db.set_setting("quote_date", "2026-10-26")  # фраза прошлой версии, до истории
+            await marta.db.set_setting("quote_text", "Не торопись, всё сложится как надо!")
+            quotes = []
+            for day in range(27, 32):
+                marta.clock = datetime(2026, 10, day, 9, 0)
+                quotes.append(await marta.quote_of_day())
+                assert await marta.quote_of_day() == quotes[-1]  # весь день одна и та же
+            assert "Не торопись, всё сложится как надо!" not in quotes
+            assert len(set(quotes)) == len(quotes)  # пять дней — пять разных фраз
+            assert ai.calls[0][2][-1].startswith("Не торопись")  # GigaChat видит недавние фразы
+            assert len({kind for kind, _, _ in ai.calls}) >= 3  # виды фраз чередуются
+        finally:
             await marta.db.close()
 
     run(scenario())
