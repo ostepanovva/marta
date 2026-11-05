@@ -53,6 +53,21 @@ sudo git fetch origin && sudo git checkout dev && sudo bash deploy/install-webap
 `sudo docker compose up -d`. Полный откат к ветке `main`: `sudo bash deploy/rollback.sh`
 (с `--nginx` — еще и убрать адрес из Nginx).
 
+## Резервные копии
+
+Каждую ночь в 00:15 Марта присылает владельцу в Telegram файл `marta-ГГГГ-ММ-ДД.db.gz` —
+сжатую копию всей базы (без звука). Выключить: `BACKUP_TO_TELEGRAM=0` в `.env`.
+Файл не зашифрован: в нем те же записи, что видны в чате с Мартой.
+
+Восстановление:
+
+1. Сохраните файл из Telegram на компьютер (например, в «Загрузки»).
+2. Скопируйте его на сервер (PowerShell на компьютере):
+   `scp -i "C:\Users\<имя>\.ssh\id_ed25519" "$HOME\Downloads\marta-2026-11-06.db.gz" ostepa@<IP-сервера>:~`
+3. На сервере: `cd /opt/marta && sudo bash deploy/restore-backup.sh ~/marta-2026-11-06.db.gz`
+
+Скрипт проверит копию, сохранит текущую базу в `backups/` и перезапустит Марту.
+
 ## Полезные команды (из папки `/opt/marta`)
 
 | Что сделать | Команда |

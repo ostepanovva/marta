@@ -49,6 +49,7 @@ class Settings:
     webapp_enabled: bool = False
     webapp_url: str = ""
     webapp_port: int = 8080
+    backup_to_telegram: bool = True
 
 
 def load_settings() -> Settings:
@@ -69,4 +70,5 @@ def load_settings() -> Settings:
         webapp_enabled=os.getenv("WEBAPP_ENABLED", "0").strip() == "1",
         webapp_url=os.getenv("WEBAPP_URL", "").strip().rstrip("/"),
         webapp_port=int(os.getenv("WEBAPP_PORT", "8080")),
+        backup_to_telegram=os.getenv("BACKUP_TO_TELEGRAM", "1").strip() == "1",
     )

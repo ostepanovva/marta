@@ -2,6 +2,9 @@
 
 import json
 import logging
+import os
+import sqlite3
+import tempfile
 from datetime import datetime, timedelta
 
 import aiosqlite
@@ -261,6 +264,27 @@ class Database:
             (key, value),
         )
         await self.conn.commit()
+
+    # --- резервная копия ---
+
+    async def backup_bytes(self) -> bytes:
+        """Согласованная копия всей базы, даже пока бот с ней работает."""
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        try:
+            target = sqlite3.connect(path, check_same_thread=False)
+            try:
+                await self.conn.backup(target)
+            finally:
+                target.close()
+            with open(path, "rb") as file:
+                return file.read()
+        finally:
+            os.remove(path)
+
+    async def count_active(self) -> int:
+        async with self.conn.execute("SELECT COUNT(*) FROM items WHERE status != 'done'") as cur:
+            return (await cur.fetchone())[0]
 
     # --- ночное обслуживание ---
 

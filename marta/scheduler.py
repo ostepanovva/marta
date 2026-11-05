@@ -3,6 +3,7 @@
 import logging
 
 from aiogram import Bot
+from aiogram.types import BufferedInputFile
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from . import keyboards as kb
@@ -45,12 +46,23 @@ def build_scheduler(marta: Marta, bot: Bot) -> AsyncIOScheduler:
         except Exception:
             log.exception("Ошибка ночной уборки")
 
+    async def backup() -> None:
+        try:
+            filename, data, caption = await marta.backup()
+            await bot.send_document(owner, BufferedInputFile(data, filename), caption=caption,
+                                    disable_notification=True)
+            log.info("Копия базы отправлена владельцу: %s, %s КБ", filename, len(data) // 1024)
+        except Exception:
+            log.exception("Ошибка ночной копии базы")
+
     s = marta.settings
     scheduler = AsyncIOScheduler(timezone=s.tz)
     scheduler.add_job(reminders, "cron", second=5, max_instances=1, coalesce=True)
     scheduler.add_job(morning, "cron", id="morning", hour=s.morning_at.hour, minute=s.morning_at.minute)
     scheduler.add_job(evening, "cron", id="evening", hour=s.evening_at.hour, minute=s.evening_at.minute)
     scheduler.add_job(nightly, "cron", hour=0, minute=5)
+    if s.backup_to_telegram:
+        scheduler.add_job(backup, "cron", hour=0, minute=15)
 
     async def apply_times() -> None:
         """Переносит сводки на время из настроек — сразу, без перезапуска."""

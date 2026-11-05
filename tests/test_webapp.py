@@ -1,4 +1,5 @@
 import asyncio
+import gzip
 import hashlib
 import hmac
 import json
@@ -286,5 +287,29 @@ def test_quote_of_day_does_not_repeat():
             assert len({kind for kind, _, _ in ai.calls}) >= 3  # виды фраз чередуются
         finally:
             await marta.db.close()
+
+    run(scenario())
+
+
+def test_nightly_backup_is_a_working_copy(tmp_path):
+    async def scenario():
+        marta = await make_marta()
+        try:
+            await marta.create_from_form({"kind": "task", "title": "Позвонить в банк", "category": "Финансы",
+                                          "date": "2026-11-06"})
+            await marta.create_from_form({"kind": "shopping", "title": "Хлеб"})
+            filename, data, caption = await marta.backup()
+        finally:
+            await marta.db.close()
+        assert filename == "marta-2026-10-21.db.gz" and "записей — 2" in caption
+        path = tmp_path / "restored.db"
+        path.write_bytes(gzip.decompress(data))
+        restored = Database(str(path))  # копию открывает обычная Марта
+        await restored.connect()
+        try:
+            titles = sorted(i["title"] for i in await restored.active_items())
+            assert titles == ["Позвонить в банк", "Хлеб"]
+        finally:
+            await restored.close()
 
     run(scenario())

@@ -1,6 +1,7 @@
 """Логика Марты, общая для бота, расписания и мини-приложения."""
 
 import asyncio
+import gzip
 import json
 import logging
 import random
@@ -325,6 +326,15 @@ class Marta:
         not_done = await self.db.due_between(day, tomorrow, ("task", "payment"))
         upcoming = await self.db.due_between(tomorrow, tomorrow + timedelta(days=1), ("task", "payment", "birthday"))
         return done, not_done, upcoming
+
+    async def backup(self) -> tuple[str, bytes, str]:
+        """Сжатая копия базы для отправки владельцу: имя файла, содержимое, подпись."""
+        now = self.now()
+        data = gzip.compress(await self.db.backup_bytes())
+        records = await self.db.count_active()
+        caption = (f"💾 Копия базы Марты на {now:%d.%m.%Y %H:%M}: записей — {records}. "
+                   "Если с сервером что-то случится, по этому файлу записи можно восстановить.")
+        return f"marta-{now:%Y-%m-%d}.db.gz", data, caption
 
     async def nightly(self) -> None:
         """Сдвигает прошедшие повторяющиеся события на следующий раз и чистит старое."""
